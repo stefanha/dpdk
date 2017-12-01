@@ -3107,6 +3107,11 @@ This section lists supported pattern items and their attributes, if any.
 
   - ``teid {unsigned}``: tunnel endpoint identifier.
 
+- ``geneve``: match GENEVE header.
+
+  - ``vni {unsigned}``: virtual network identifier.
+  - ``protocol {unsigned}``: protocol type.
+
 Actions list
 ^^^^^^^^^^^^
 

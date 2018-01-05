@@ -261,7 +261,7 @@ reset_device(struct virtio_net *dev)
  * there is a new virtio device being attached).
  */
 int
-vhost_new_device(void)
+vhost_new_device(const struct vhost_transport_ops *trans_ops)
 {
 	struct virtio_net *dev;
 	int i;
@@ -287,7 +287,7 @@ vhost_new_device(void)
 	vhost_devices[i] = dev;
 	dev->vid = i;
 	dev->slave_req_fd = -1;
-	dev->trans_ops = &af_unix_trans_ops;
+	dev->trans_ops = trans_ops;
 
 	return i;
 }

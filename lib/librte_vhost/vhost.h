@@ -302,9 +302,9 @@ struct virtio_net {
 	int			slave_req_fd;
 } __rte_cache_aligned;
 
-/* The vhost_user, vhost_user_socket, and reconnect declarations are temporary
- * measures for moving AF_UNIX code into trans_af_unix.c.  They will be cleaned
- * up as socket.c is untangled from trans_af_unix.c.
+/* The vhost_user and vhost_user_socket declarations are temporary measures for
+ * moving AF_UNIX code into trans_af_unix.c.  They will be cleaned up as
+ * socket.c is untangled from trans_af_unix.c.
  */
 /*
  * Every time rte_vhost_driver_register() is invoked, an associated
@@ -345,10 +345,6 @@ struct vhost_user {
 };
 
 extern struct vhost_user vhost_user;
-
-extern pthread_t reconn_tid;
-
-int vhost_user_reconnect_init(void);
 
 #define VHOST_LOG_PAGE	4096
 

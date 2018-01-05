@@ -39,10 +39,17 @@
 
 #include <rte_log.h>
 
+#include "fd_man.h"
 #include "vhost.h"
 #include "vhost_user.h"
 
 #define MAX_VIRTIO_BACKLOG 128
+
+static struct fdset af_unix_fdset = {
+	.fd = { [0 ... MAX_FDS - 1] = {-1, NULL, NULL, NULL, 0} },
+	.fd_mutex = PTHREAD_MUTEX_INITIALIZER,
+	.num = 0
+};
 
 TAILQ_HEAD(vhost_user_connection_list, vhost_user_connection);
 
@@ -195,7 +202,7 @@ vhost_user_add_connection(int fd, struct vhost_user_socket *vsocket)
 	conn->connfd = fd;
 	conn->vsocket = vsocket;
 	conn->vid = vid;
-	ret = fdset_add(&vhost_user.fdset, fd, vhost_user_read_cb,
+	ret = fdset_add(&af_unix_fdset, fd, vhost_user_read_cb,
 			NULL, conn);
 	if (ret < 0) {
 		RTE_LOG(ERR, VHOST_CONFIG,
@@ -316,7 +323,7 @@ vhost_user_start_server(struct vhost_user_socket *vsocket)
 	if (ret < 0)
 		goto err;
 
-	ret = fdset_add(&vhost_user.fdset, fd, vhost_user_server_new_connection,
+	ret = fdset_add(&af_unix_fdset, fd, vhost_user_server_new_connection,
 		  NULL, vsocket);
 	if (ret < 0) {
 		RTE_LOG(ERR, VHOST_CONFIG,
@@ -551,7 +558,7 @@ af_unix_socket_cleanup(struct vhost_user_socket *vsocket)
 	struct vhost_user_connection *conn, *next;
 
 	if (vsocket->is_server) {
-		fdset_del(&vhost_user.fdset, s->socket_fd);
+		fdset_del(&af_unix_fdset, s->socket_fd);
 		close(s->socket_fd);
 		unlink(vsocket->path);
 	} else if (vsocket->reconnect) {
@@ -564,7 +571,7 @@ af_unix_socket_cleanup(struct vhost_user_socket *vsocket)
 	     conn = next) {
 		next = TAILQ_NEXT(conn, next);
 
-		fdset_del(&vhost_user.fdset, conn->connfd);
+		fdset_del(&af_unix_fdset, conn->connfd);
 		RTE_LOG(INFO, VHOST_CONFIG,
 			"free connfd = %d for device '%s'\n",
 			conn->connfd, vsocket->path);
@@ -581,6 +588,16 @@ af_unix_socket_cleanup(struct vhost_user_socket *vsocket)
 static int
 af_unix_socket_start(struct vhost_user_socket *vsocket)
 {
+	static pthread_t fdset_tid;
+
+	if (fdset_tid == 0) {
+		int ret = pthread_create(&fdset_tid, NULL, fdset_event_dispatch,
+				     &af_unix_fdset);
+		if (ret != 0)
+			RTE_LOG(ERR, VHOST_CONFIG,
+				"failed to create fdset handling thread");
+	}
+
 	if (vsocket->is_server)
 		return vhost_user_start_server(vsocket);
 	else

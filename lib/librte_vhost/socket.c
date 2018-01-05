@@ -191,7 +191,7 @@ rte_vhost_driver_register(const char *path, uint64_t flags)
 	} else {
 		vsocket->is_server = true;
 	}
-	ret = create_unix_socket(vsocket);
+	ret = trans_ops->socket_init(vsocket, flags);
 	if (ret < 0) {
 		goto out_mutex;
 	}
@@ -231,13 +231,7 @@ rte_vhost_driver_unregister(const char *path)
 		struct vhost_user_socket *vsocket = vhost_user.vsockets[i];
 
 		if (!strcmp(vsocket->path, path)) {
-			if (vsocket->is_server) {
-				fdset_del(&vhost_user.fdset, vsocket->socket_fd);
-				close(vsocket->socket_fd);
-				unlink(path);
-			} else if (vsocket->reconnect) {
-				vhost_user_remove_reconnect(vsocket);
-			}
+			vsocket->trans_ops->socket_cleanup(vsocket);
 
 			pthread_mutex_lock(&vsocket->conn_mutex);
 			for (conn = TAILQ_FIRST(&vsocket->conn_list);

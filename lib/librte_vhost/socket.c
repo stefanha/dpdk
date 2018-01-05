@@ -153,13 +153,6 @@ rte_vhost_driver_register(const char *path, uint64_t flags)
 		free(vsocket);
 		goto out;
 	}
-	TAILQ_INIT(&vsocket->conn_list);
-	ret = pthread_mutex_init(&vsocket->conn_mutex, NULL);
-	if (ret) {
-		RTE_LOG(ERR, VHOST_CONFIG,
-			"error: failed to init connection mutex\n");
-		goto out_free;
-	}
 	vsocket->dequeue_zero_copy = flags & RTE_VHOST_USER_DEQUEUE_ZERO_COPY;
 
 	/*
@@ -186,14 +179,14 @@ rte_vhost_driver_register(const char *path, uint64_t flags)
 		vsocket->reconnect = !(flags & RTE_VHOST_USER_NO_RECONNECT);
 		if (vsocket->reconnect && reconn_tid == 0) {
 			if (vhost_user_reconnect_init() != 0)
-				goto out_mutex;
+				goto out_free;
 		}
 	} else {
 		vsocket->is_server = true;
 	}
 	ret = trans_ops->socket_init(vsocket, flags);
 	if (ret < 0) {
-		goto out_mutex;
+		goto out_free;
 	}
 
 	vhost_user.vsockets[vhost_user.vsocket_cnt++] = vsocket;
@@ -201,11 +194,6 @@ rte_vhost_driver_register(const char *path, uint64_t flags)
 	pthread_mutex_unlock(&vhost_user.mutex);
 	return ret;
 
-out_mutex:
-	if (pthread_mutex_destroy(&vsocket->conn_mutex)) {
-		RTE_LOG(ERR, VHOST_CONFIG,
-			"error: failed to destroy connection mutex\n");
-	}
 out_free:
 	free(vsocket->path);
 	free(vsocket);
@@ -223,7 +211,6 @@ rte_vhost_driver_unregister(const char *path)
 {
 	int i;
 	int count;
-	struct vhost_user_connection *conn, *next;
 
 	pthread_mutex_lock(&vhost_user.mutex);
 
@@ -232,25 +219,6 @@ rte_vhost_driver_unregister(const char *path)
 
 		if (!strcmp(vsocket->path, path)) {
 			vsocket->trans_ops->socket_cleanup(vsocket);
-
-			pthread_mutex_lock(&vsocket->conn_mutex);
-			for (conn = TAILQ_FIRST(&vsocket->conn_list);
-			     conn != NULL;
-			     conn = next) {
-				next = TAILQ_NEXT(conn, next);
-
-				fdset_del(&vhost_user.fdset, conn->connfd);
-				RTE_LOG(INFO, VHOST_CONFIG,
-					"free connfd = %d for device '%s'\n",
-					conn->connfd, path);
-				close(conn->connfd);
-				vhost_destroy_device(conn->vid);
-				TAILQ_REMOVE(&vsocket->conn_list, conn, next);
-				free(conn);
-			}
-			pthread_mutex_unlock(&vsocket->conn_mutex);
-
-			pthread_mutex_destroy(&vsocket->conn_mutex);
 			free(vsocket->path);
 			free(vsocket);
 

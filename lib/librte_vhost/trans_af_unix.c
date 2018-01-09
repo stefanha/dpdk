@@ -57,6 +57,7 @@ struct vhost_user_connection {
 	struct virtio_net device; /* must be the first field! */
 	struct vhost_user_socket *vsocket;
 	int connfd;
+	int slave_req_fd;
 
 	TAILQ_ENTRY(vhost_user_connection) next;
 };
@@ -173,8 +174,30 @@ af_unix_send_reply(struct virtio_net *dev, struct VhostUserMsg *msg)
 static int
 af_unix_send_slave_req(struct virtio_net *dev, struct VhostUserMsg *msg)
 {
-	return send_fd_message(dev->slave_req_fd, msg,
+	struct vhost_user_connection *conn =
+		container_of(dev, struct vhost_user_connection, device);
+
+	return send_fd_message(conn->slave_req_fd, msg,
 			       VHOST_USER_HDR_SIZE + msg->size, NULL, 0);
+}
+
+static int
+af_unix_set_slave_req_fd(struct virtio_net *dev, struct VhostUserMsg *msg)
+{
+	struct vhost_user_connection *conn =
+		container_of(dev, struct vhost_user_connection, device);
+	int fd = msg->fds[0];
+
+	if (fd < 0) {
+		RTE_LOG(ERR, VHOST_CONFIG,
+				"Invalid file descriptor for slave channel (%d)\n",
+				fd);
+		return -1;
+	}
+
+	conn->slave_req_fd = fd;
+
+	return 0;
 }
 
 static void
@@ -194,6 +217,7 @@ vhost_user_add_connection(int fd, struct vhost_user_socket *vsocket)
 
 	conn = container_of(dev, struct vhost_user_connection, device);
 	conn->connfd = fd;
+	conn->slave_req_fd = -1;
 	conn->vsocket = vsocket;
 
 	size = strnlen(vsocket->path, PATH_MAX);
@@ -657,6 +681,19 @@ af_unix_socket_start(struct vhost_user_socket *vsocket)
 		return vhost_user_start_client(vsocket);
 }
 
+static void
+af_unix_cleanup_device(struct virtio_net *dev __rte_unused,
+		       int destroy __rte_unused)
+{
+	struct vhost_user_connection *conn =
+		container_of(dev, struct vhost_user_connection, device);
+
+	if (conn->slave_req_fd >= 0) {
+		close(conn->slave_req_fd);
+		conn->slave_req_fd = -1;
+	}
+}
+
 static int
 af_unix_vring_call(struct virtio_net *dev __rte_unused,
 		   struct vhost_virtqueue *vq)
@@ -672,7 +709,9 @@ const struct vhost_transport_ops af_unix_trans_ops = {
 	.socket_init = af_unix_socket_init,
 	.socket_cleanup = af_unix_socket_cleanup,
 	.socket_start = af_unix_socket_start,
+	.cleanup_device = af_unix_cleanup_device,
 	.vring_call = af_unix_vring_call,
 	.send_reply = af_unix_send_reply,
 	.send_slave_req = af_unix_send_slave_req,
+	.set_slave_req_fd = af_unix_set_slave_req_fd,
 };

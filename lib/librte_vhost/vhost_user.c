@@ -96,11 +96,6 @@ vhost_backend_cleanup(struct virtio_net *dev)
 		munmap((void *)(uintptr_t)dev->log_addr, dev->log_size);
 		dev->log_addr = 0;
 	}
-
-	if (dev->slave_req_fd >= 0) {
-		close(dev->slave_req_fd);
-		dev->slave_req_fd = -1;
-	}
 }
 
 /*
@@ -1030,18 +1025,7 @@ vhost_user_net_set_mtu(struct virtio_net *dev, struct VhostUserMsg *msg)
 static int
 vhost_user_set_req_fd(struct virtio_net *dev, struct VhostUserMsg *msg)
 {
-	int fd = msg->fds[0];
-
-	if (fd < 0) {
-		RTE_LOG(ERR, VHOST_CONFIG,
-				"Invalid file descriptor for slave channel (%d)\n",
-				fd);
-		return -1;
-	}
-
-	dev->slave_req_fd = fd;
-
-	return 0;
+	return dev->trans_ops->set_slave_req_fd(dev, msg);
 }
 
 static int

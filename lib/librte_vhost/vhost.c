@@ -96,6 +96,8 @@ cleanup_device(struct virtio_net *dev, int destroy)
 
 	for (i = 0; i < dev->nr_vring; i++)
 		cleanup_vq(dev->virtqueue[i], destroy);
+
+	dev->trans_ops->cleanup_device(dev, destroy);
 }
 
 void
@@ -286,7 +288,6 @@ vhost_new_device(const struct vhost_transport_ops *trans_ops)
 
 	vhost_devices[i] = dev;
 	dev->vid = i;
-	dev->slave_req_fd = -1;
 	dev->trans_ops = trans_ops;
 
 	return dev;

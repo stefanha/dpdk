@@ -1494,7 +1494,7 @@ nfp_net_dev_mtu_set(struct rte_eth_dev *dev, uint16_t mtu)
 	/* mtu setting is forbidden if port is started */
 	if (dev->data->dev_started) {
 		PMD_DRV_LOG(ERR, "port %d must be stopped before configuration",
-			    dev_data->port_id);
+			    dev->data->port_id);
 		return -EBUSY;
 	}
 

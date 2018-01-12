@@ -12,5 +12,7 @@ DIRS-$(CONFIG_RTE_LIBRTE_CRYPTODEV) += crypto
 DEPDIRS-crypto := bus mempool
 DIRS-$(CONFIG_RTE_LIBRTE_EVENTDEV) += event
 DEPDIRS-event := bus mempool net
+DIRS-$(CONFIG_RTE_LIBRTE_VHOST) += librte_vhost
+DEPDIRS-librte_vhost := bus
 
 include $(RTE_SDK)/mk/rte.subdir.mk

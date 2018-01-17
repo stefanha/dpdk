@@ -34,6 +34,8 @@
  */
 
 #include <sys/socket.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
 #include <sys/un.h>
 #include <fcntl.h>
 
@@ -703,6 +705,80 @@ af_unix_vring_call(struct virtio_net *dev __rte_unused,
 	return 0;
 }
 
+static uint64_t
+get_blk_size(int fd)
+{
+	struct stat stat;
+	int ret;
+
+	ret = fstat(fd, &stat);
+	return ret == -1 ? (uint64_t)-1 : (uint64_t)stat.st_blksize;
+}
+
+static int
+af_unix_map_mem_regions(struct virtio_net *dev)
+{
+	uint32_t i;
+
+	for (i = 0; i < dev->mem->nregions; i++) {
+		struct rte_vhost_mem_region *reg = &dev->mem->regions[i];
+		uint64_t mmap_size = reg->mmap_size;
+		uint64_t mmap_offset = mmap_size - reg->size;
+		uint64_t alignment;
+		void *mmap_addr;
+
+		/* mmap() without flag of MAP_ANONYMOUS, should be called
+		 * with length argument aligned with hugepagesz at older
+		 * longterm version Linux, like 2.6.32 and 3.2.72, or
+		 * mmap() will fail with EINVAL.
+		 *
+		 * to avoid failure, make sure in caller to keep length
+		 * aligned.
+		 */
+		alignment = get_blk_size(reg->fd);
+		if (alignment == (uint64_t)-1) {
+			RTE_LOG(ERR, VHOST_CONFIG,
+				"couldn't get hugepage size through fstat\n");
+			return -1;
+		}
+		mmap_size = RTE_ALIGN_CEIL(mmap_size, alignment);
+
+		mmap_addr = mmap(NULL, mmap_size, PROT_READ | PROT_WRITE,
+				 MAP_SHARED | MAP_POPULATE, reg->fd, 0);
+
+		if (mmap_addr == MAP_FAILED) {
+			RTE_LOG(ERR, VHOST_CONFIG,
+				"mmap region %u failed.\n", i);
+			return -1;
+		}
+
+		reg->mmap_addr = mmap_addr;
+		reg->mmap_size = mmap_size;
+		reg->host_user_addr = (uint64_t)(uintptr_t)reg->mmap_addr +
+				      mmap_offset;
+
+		if (dev->dequeue_zero_copy)
+			vhost_add_guest_pages(dev, reg, alignment);
+	}
+
+	return 0;
+}
+
+static void
+af_unix_unmap_mem_regions(struct virtio_net *dev)
+{
+	uint32_t i;
+	struct rte_vhost_mem_region *reg;
+
+	for (i = 0; i < dev->mem->nregions; i++) {
+		reg = &dev->mem->regions[i];
+		if (reg->host_user_addr) {
+			munmap(reg->mmap_addr, reg->mmap_size);
+			close(reg->fd);
+		}
+	}
+}
+
 const struct vhost_transport_ops af_unix_trans_ops = {
 	.socket_size = sizeof(struct af_unix_socket),
 	.device_size = sizeof(struct vhost_user_connection),
@@ -714,4 +790,6 @@ const struct vhost_transport_ops af_unix_trans_ops = {
 	.send_reply = af_unix_send_reply,
 	.send_slave_req = af_unix_send_slave_req,
 	.set_slave_req_fd = af_unix_set_slave_req_fd,
+	.map_mem_regions = af_unix_map_mem_regions,
+	.unmap_mem_regions = af_unix_unmap_mem_regions,
 };

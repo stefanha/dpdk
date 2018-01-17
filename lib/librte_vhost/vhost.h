@@ -315,6 +315,23 @@ struct vhost_transport_ops {
 	 */
 	int (*set_slave_req_fd)(struct virtio_net *dev,
 				struct VhostUserMsg *msg);
+
+	/**
+	 * Map memory table regions in dev->mem->regions[].
+	 *
+	 * @param dev
+	 *  vhost device
+	 */
+	int (*map_mem_regions)(struct virtio_net *dev);
+
+	/**
+	 * Unmap memory table regions in dev->mem->regions[] and free any
+	 * resources, such as file descriptors.
+	 *
+	 * @param dev
+	 *  vhost device
+	 */
+	void (*unmap_mem_regions)(struct virtio_net *dev);
 };
 
 /** The traditional AF_UNIX vhost-user protocol transport. */

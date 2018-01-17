@@ -52,32 +52,13 @@ static const char *vhost_message_str[VHOST_USER_MAX] = {
 	[VHOST_USER_IOTLB_MSG]  = "VHOST_USER_IOTLB_MSG",
 };
 
-static uint64_t
-get_blk_size(int fd)
-{
-	struct stat stat;
-	int ret;
-
-	ret = fstat(fd, &stat);
-	return ret == -1 ? (uint64_t)-1 : (uint64_t)stat.st_blksize;
-}
-
 static void
 free_mem_region(struct virtio_net *dev)
 {
-	uint32_t i;
-	struct rte_vhost_mem_region *reg;
-
 	if (!dev || !dev->mem)
 		return;
 
-	for (i = 0; i < dev->mem->nregions; i++) {
-		reg = &dev->mem->regions[i];
-		if (reg->host_user_addr) {
-			munmap(reg->mmap_addr, reg->mmap_size);
-			close(reg->fd);
-		}
-	}
+	dev->trans_ops->unmap_mem_regions(dev);
 }
 
 void
@@ -516,9 +497,9 @@ add_one_guest_page(struct virtio_net *dev, uint64_t guest_phys_addr,
 	page->size = size;
 }
 
-static void
-add_guest_pages(struct virtio_net *dev, struct rte_vhost_mem_region *reg,
-		uint64_t page_size)
+void
+vhost_add_guest_pages(struct virtio_net *dev, struct rte_vhost_mem_region *reg,
+		      uint64_t page_size)
 {
 	uint64_t reg_size = reg->size;
 	uint64_t host_user_addr  = reg->host_user_addr;
@@ -602,19 +583,17 @@ vhost_user_set_mem_table(struct virtio_net *dev, struct VhostUserMsg *pmsg)
 {
 	struct VhostUserMemory memory = pmsg->payload.memory;
 	struct rte_vhost_mem_region *reg;
-	void *mmap_addr;
-	uint64_t mmap_size;
-	uint64_t mmap_offset;
-	uint64_t alignment;
 	uint32_t i;
-	int fd;
 
 	if (dev->mem && !vhost_memory_changed(&memory, dev->mem)) {
 		RTE_LOG(INFO, VHOST_CONFIG,
 			"(%d) memory regions not changed\n", dev->vid);
 
-		for (i = 0; i < memory.nregions; i++)
-			close(pmsg->fds[i]);
+		for (i = 0; i < memory.nregions; i++) {
+			if (pmsg->fds[i] >= 0) {
+				close(pmsg->fds[i]);
+			}
+		}
 
 		return 0;
 	}
@@ -649,50 +628,24 @@ vhost_user_set_mem_table(struct virtio_net *dev, struct VhostUserMsg *pmsg)
 	}
 	dev->mem->nregions = memory.nregions;
 
+	/* Fill in dev->mem->regions[] */
 	for (i = 0; i < memory.nregions; i++) {
-		fd  = pmsg->fds[i];
 		reg = &dev->mem->regions[i];
 
 		reg->guest_phys_addr = memory.regions[i].guest_phys_addr;
 		reg->guest_user_addr = memory.regions[i].userspace_addr;
 		reg->size            = memory.regions[i].memory_size;
-		reg->fd              = fd;
+		reg->mmap_size       = reg->size + memory.regions[i].mmap_offset;
+		reg->mmap_addr       = NULL;
+		reg->host_user_addr  = 0;
+		reg->fd              = pmsg->fds[i];
+	}
 
-		mmap_offset = memory.regions[i].mmap_offset;
-		mmap_size   = reg->size + mmap_offset;
+	if (dev->trans_ops->map_mem_regions(dev) < 0)
+		goto err;
 
-		/* mmap() without flag of MAP_ANONYMOUS, should be called
-		 * with length argument aligned with hugepagesz at older
-		 * longterm version Linux, like 2.6.32 and 3.2.72, or
-		 * mmap() will fail with EINVAL.
-		 *
-		 * to avoid failure, make sure in caller to keep length
-		 * aligned.
-		 */
-		alignment = get_blk_size(fd);
-		if (alignment == (uint64_t)-1) {
-			RTE_LOG(ERR, VHOST_CONFIG,
-				"couldn't get hugepage size through fstat\n");
-			goto err_mmap;
-		}
-		mmap_size = RTE_ALIGN_CEIL(mmap_size, alignment);
-
-		mmap_addr = mmap(NULL, mmap_size, PROT_READ | PROT_WRITE,
-				 MAP_SHARED | MAP_POPULATE, fd, 0);
-
-		if (mmap_addr == MAP_FAILED) {
-			RTE_LOG(ERR, VHOST_CONFIG,
-				"mmap region %u failed.\n", i);
-			goto err_mmap;
-		}
-
-		reg->mmap_addr = mmap_addr;
-		reg->mmap_size = mmap_size;
-		reg->host_user_addr = (uint64_t)(uintptr_t)mmap_addr +
-				      mmap_offset;
-
-		if (dev->dequeue_zero_copy)
-			add_guest_pages(dev, reg, alignment);
+	for (i = 0; i < memory.nregions; i++) {
+		reg = &dev->mem->regions[i];
 
 		RTE_LOG(INFO, VHOST_CONFIG,
 			"guest memory region %u, size: 0x%" PRIx64 "\n"
@@ -701,23 +654,21 @@ vhost_user_set_mem_table(struct virtio_net *dev, struct VhostUserMsg *pmsg)
 			"\t host  virtual  addr: 0x%" PRIx64 "\n"
 			"\t mmap addr : 0x%" PRIx64 "\n"
 			"\t mmap size : 0x%" PRIx64 "\n"
-			"\t mmap align: 0x%" PRIx64 "\n"
 			"\t mmap off  : 0x%" PRIx64 "\n",
 			i, reg->size,
 			reg->guest_phys_addr,
 			reg->guest_user_addr,
 			reg->host_user_addr,
-			(uint64_t)(uintptr_t)mmap_addr,
-			mmap_size,
-			alignment,
-			mmap_offset);
+			(uint64_t)(uintptr_t)reg->mmap_addr,
+			reg->mmap_size,
+			memory.regions[i].mmap_offset);
 	}
 
 	dump_guest_pages(dev);
 
 	return 0;
 
-err_mmap:
+err:
 	free_mem_region(dev);
 	rte_free(dev->mem);
 	dev->mem = NULL;

@@ -22,11 +22,14 @@ cavium_fpa = {'Class': '08', 'Vendor': '177d', 'Device': 'a053',
               'SVendor': None, 'SDevice': None}
 cavium_pkx = {'Class': '08', 'Vendor': '177d', 'Device': 'a0dd,a049',
               'SVendor': None, 'SDevice': None}
+virtio_vhost_user = {'Class': '00', 'Vendor': '1af4', 'Device': '1017,1058',
+                     'SVendor': None, 'SDevice': None}
 
 network_devices = [network_class, cavium_pkx]
 crypto_devices = [encryption_class, intel_processor_class]
 eventdev_devices = [cavium_sso]
 mempool_devices = [cavium_fpa]
+other_devices = [virtio_vhost_user]
 
 # global dict ethernet devices present. Dictionary indexed by PCI address.
 # Each device within this is itself a dictionary of device properties
@@ -596,6 +599,9 @@ def show_status():
     if status_dev == "mempool" or status_dev == "all":
         show_device_status(mempool_devices, "Mempool")
 
+    if status_dev == 'other' or status_dev == 'all':
+        show_device_status(other_devices, "Other")
+
 def parse_args():
     '''Parses the command-line arguments given by the user and takes the
     appropriate action for each'''
@@ -669,6 +675,7 @@ def do_arg_actions():
             get_device_details(crypto_devices)
             get_device_details(eventdev_devices)
             get_device_details(mempool_devices)
+            get_device_details(other_devices)
         show_status()
 
 
@@ -681,6 +688,7 @@ def main():
     get_device_details(crypto_devices)
     get_device_details(eventdev_devices)
     get_device_details(mempool_devices)
+    get_device_details(other_devices)
     do_arg_actions()
 
 if __name__ == "__main__":

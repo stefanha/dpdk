@@ -163,6 +163,7 @@ vhost_user_set_features(struct virtio_net *dev, uint64_t features)
 		(dev->features & (1 << VIRTIO_NET_F_MRG_RXBUF)) ? "on" : "off",
 		(dev->features & (1ULL << VIRTIO_F_VERSION_1)) ? "on" : "off");
 
+#if 0
 	if (!(dev->features & (1ULL << VIRTIO_NET_F_MQ))) {
 		/*
 		 * Remove all but first queue pair if MQ hasn't been
@@ -181,6 +182,7 @@ vhost_user_set_features(struct virtio_net *dev, uint64_t features)
 			free_vq(vq);
 		}
 	}
+#endif
 
 	return 0;
 }
